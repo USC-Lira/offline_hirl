@@ -30,6 +30,7 @@ def is_catastrophe(state): # accept state here
     return position < -1.15
 
 # Function to discretize the continuous state space
+# Note: this function is not used
 def discretize_state(state):
     discretized_state = (state - env.observation_space.low) * np.array([20, 20])
     return tuple(discretized_state.astype(int))
@@ -66,6 +67,7 @@ class QNetwork(nn.Module):
         x = F.relu(self.fc2(x))
         return self.fc3(x)
 
+# Note: this replay buffer does not have a maximum buffer_size
 class ReplayBuffer:
     """Fixed-size buffer to store experience tuples."""
 
@@ -105,6 +107,7 @@ class ReplayBuffer:
         """Return the current size of internal memory."""
         return len(self.memory)
 
+# Note: this class is not used
 class Agent():
     """Interacts with and learns from the environment."""
 
@@ -230,7 +233,7 @@ EXPERIMENT_NAME = args.name     # set experiment name
 NUMEPS = args.numeps            # number of episodes
 NUMITS = args.numits            # number of iterations
 SEED = args.seed                # seed
-PENALTY = args.penalty                # seed
+PENALTY = args.penalty          # penalty (positive in argument, set to be negative below)
 ADD_HA = args.addha             # set if adding human actions
 WANDB = args.wandb              # log using wandb
 
@@ -256,9 +259,10 @@ optimal_policy = QNetwork(state_size=2, action_size=3, seed=SEED).to(device)
 optimal_policy.load_state_dict(torch.load('./checkpoints/mc_hirl_v1_s0/mc_dqn_2500.pth', map_location=device))
 # optimal_policy.cuda()
 
-optimal_policy_buffer = ReplayBuffer(action_size=4, buffer_size=-1, batch_size=64, seed=SEED)
+# Note: this replay buffer does not have a maximum buffer_size
+optimal_policy_buffer = ReplayBuffer(action_size=3, buffer_size=-1, batch_size=64, seed=SEED)
 
-num_episodes_to_run = NUMEPS # should be more, maybe close to 1000? what can be stored in the ram?
+num_episodes_to_run = NUMEPS
 max_t = 200
 total_test_reward = 0
 num_test_catastrophes = 0
@@ -371,6 +375,7 @@ for i_iteration in range(NUMITS):
     if run != None:
         wandb.log({"loss": loss})
 
+    # for test_score, test_catastrophe, and render logging:
     if i_iteration % (NUMITS * 0.01) == 0 and run != None:
         frames = []
         num_test_episodes = 10
@@ -420,6 +425,7 @@ for i_iteration in range(NUMITS):
         average_test_reward = total_test_reward / num_test_episodes
         wandb.log({"test_catastophe": average_test_catastrophes, "test_score": average_test_reward})
 
+# ignore old code
 ############
 
 # offline_agent = Agent(state_size=8, action_size=4, seed=SEED)
