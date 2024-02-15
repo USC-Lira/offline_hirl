@@ -84,7 +84,9 @@ class Agent():
             state (array_like): current state
             eps (float): epsilon, for epsilon-greedy action selection
         """
-        state = torch.from_numpy(state).float().unsqueeze(0).to(device)
+        state_one_hot = np.zeros(self.state_size)
+        state_one_hot[state] = 1
+        state = torch.from_numpy(state_one_hot).float().unsqueeze(0).to(device)
         self.qnetwork_local.eval()
         with torch.no_grad():
             action_values = self.qnetwork_local(state)
@@ -97,33 +99,33 @@ class Agent():
             return random.choice(np.arange(self.action_size))
 
     def learn(self, experiences, gamma):
-        """Update value parameters using given batch of experience tuples.
-        Params
-        ======
-            experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples
-            gamma (float): discount factor
-        """
         states, actions, rewards, next_states, dones = experiences
 
-        # Get max predicted Q values (for next states) from target model
-        Q_targets_next = self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1)
-        # Compute Q targets for current states
+        # Flatten the states and next_states tensors and convert them to integer type
+        states_np = states.squeeze().long().cpu().numpy()
+        next_states_np = next_states.squeeze().long().cpu().numpy()
+
+        # Create one-hot encoded numpy arrays
+        states_one_hot_np = np.eye(self.state_size)[states_np]
+        next_states_one_hot_np = np.eye(self.state_size)[next_states_np]
+
+        # Convert one-hot encoded numpy arrays back to PyTorch tensors
+        states_one_hot = torch.from_numpy(states_one_hot_np).float().to(device)
+        next_states_one_hot = torch.from_numpy(next_states_one_hot_np).float().to(device)
+
+        # Continue with the existing logic for Q-learning
+        Q_targets_next = self.qnetwork_target(next_states_one_hot).detach().max(1)[0].unsqueeze(1)
         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
+        Q_expected = self.qnetwork_local(states_one_hot).gather(1, actions)
 
-        # Get expected Q values from local model
-        Q_expected = self.qnetwork_local(states).gather(1, actions)
-
-        # Compute loss
         loss = F.mse_loss(Q_expected, Q_targets)
-        # Minimize the loss
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-        # ------------------- update target network ------------------- #
         self.soft_update(self.qnetwork_local, self.qnetwork_target, TAU)
 
-        if run != None:
+        if run is not None:
             wandb.log({"loss": loss})
 
     def soft_update(self, local_model, target_model, tau):
@@ -176,9 +178,9 @@ class ReplayBuffer:
     def __len__(self):
         """Return the current size of internal memory."""
         return len(self.memory)
-
+    
 def train(agent,
-    n_episodes=2000, max_t=200, eps_start=1.0, eps_end=0.01, eps_decay=0.999):
+    n_episodes=1000, max_t=200, eps_start=1.0, eps_end=0.01, eps_decay=0.999):
     """Deep Q-Learning.
 
     Params
@@ -210,7 +212,7 @@ def train(agent,
                 action = agent.act(state, eps)
                 robot_action = action
                 
-                if detect_catastrophe(state, action):
+                if detect_catastrophe(state, action, env):
                     flag = 1
                     action = 2
                     num_blocker += 1
@@ -241,7 +243,7 @@ def train(agent,
                 action = agent.act(state, eps)
                 robot_action = action
                 
-                if detect_catastrophe(state, action):
+                if detect_catastrophe(state, action, env):
                     flag = 1
                     action = 2
                     num_blocker += 1
@@ -324,25 +326,31 @@ def train(agent,
         
     return scores
 
-def detect_catastrophe(state, action, force=0.001, gravity=0.0025): # accept state here
-    tuple_state = tuple(state)
-    position = tuple_state[0]
-    velocity = tuple_state[1]
-
-    new_velocity = np.clip(velocity + (action - 1) * force - np.cos(3 * position) * gravity, -0.07, 0.07)
-    new_position = np.clip(position + new_velocity, -1.2, 0.6)
+def detect_catastrophe(state, action, env):
+    # Define the action mappings
+    # In an 8x8 grid: 0: Left, 1: Down, 2: Right, 3: Up
+    action_effects = {0: -1, 1: 8, 2: 1, 3: -8}
     
-    return new_position < -1.15
+    # Calculate the next state
+    next_state = state + action_effects[action]
 
-def is_catastrophe(state): # accept state here
-    tuple_state = tuple(state)
-    position = tuple_state[0]
-    return position < -1.15
+    # Check if the next state is out of bounds
+    if next_state < 0 or next_state >= env.observation_space.n:
+        return False
 
-# Function to discretize the continuous state space
-def discretize_state(state):
-    discretized_state = (state - env.observation_space.low) * np.array([20, 20])
-    return tuple(discretized_state.astype(int))
+    # Check if the next state wraps around to the next row
+    if action == 0 and state % 8 == 0:  # Adjusted for 8x8 grid
+        return False
+    if action == 2 and (state + 1) % 8 == 0:  # Adjusted for 8x8 grid
+        return False
+
+    # Check if the next state is in a catastrophe zone
+    catastrophe_zones = [4, 5, 6, 7, 13, 14, 15]  # Adjusted zone indices
+    return next_state in catastrophe_zones
+
+def is_catastrophe(state):  # This function is now redundant given the above logic
+    catastrophe_zones = [4, 5, 6, 7, 13, 14, 15]
+    return int(state) in catastrophe_zones
 
 def frame_write(frame):
     img = Image.fromarray(frame)
@@ -379,7 +387,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # Handle wandb:
 wandb_hyperparameters = {
-    'env_name': 'MountainCar-v0',
+    'env_name': 'FrozenLake-v1',
     'n_episodes': NUMEPS,
     'experiment_name': EXPERIMENT_NAME,
     'dualbuf': True,
@@ -395,11 +403,12 @@ wandb_hyperparameters = {
     'exp_ver': 'v7',
 }
 
-penalty = -PENALTY
+penalty = float(-PENALTY)
 
 run = wandb.init(project="modified_hirl", name=EXPERIMENT_NAME, config=wandb_hyperparameters) if WANDB else None
 
 os.makedirs("checkpoints/" + str(EXPERIMENT_NAME), exist_ok=True)
-env = gym.make("MountainCar-v0", render_mode="rgb_array")
-agent = Agent(state_size=2, action_size=3, seed=SEED)
+env = gym.make('FrozenLake-v1', desc=None, map_name="8x8", is_slippery=False, render_mode="rgb_array")
+# env = gym.make("MountainCar-v0", render_mode="rgb_array")
+agent = Agent(state_size=64, action_size=4, seed=SEED)
 train(agent, n_episodes=NUMEPS)
