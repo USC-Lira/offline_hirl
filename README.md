@@ -7,20 +7,20 @@ Prerequisites:
 - wandb (for logging and visualization)
 - PIL (for image handling)
 ```
-pip install torch gymnasium numpy wandb pillow
+pip install torch gymnasium numpy wandb pillow moviepy imageio ipdb 
 ```
 
 ## Mountain Car
 
 ### Overview
-1. **mcdqn.py**: Implements a Deep Q-Network for the Mountain Car environment.
+1. **mc_dqn.py**: Implements a Deep Q-Network for the Mountain Car environment.
 2. **mc_offlinerl.py**: Collects experiences using a provided policy and then trains a new policy offline with these experiences.
 
 ### Usage
 #### Training the DQN Agent
 To train the DQN agent on the Mountain Car environment, run:
 ```
-python3 mcdqn.py --name experiment_name --numeps 3000 --seed 0 --penalty 2 --wandb
+python3 mc_dqn.py --name experiment_name --numeps 3000 --seed 0 --penalty 2 --wandb
 ```
 Arguments:
 - --name: Set the name of the experiment.

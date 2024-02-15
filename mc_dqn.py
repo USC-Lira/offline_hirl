@@ -13,6 +13,7 @@ import wandb
 import argparse
 from PIL import Image, ImageDraw, ImageFont
 
+
 class QNetwork(nn.Module):
     """Actor (Policy) Model."""
 
@@ -38,7 +39,8 @@ class QNetwork(nn.Module):
         x = F.relu(self.fc2(x))
         return self.fc3(x)
 
-class Agent():
+
+class Agent:
     """Interacts with and learns from the environment."""
 
     def __init__(self, state_size, action_size, seed):
@@ -76,7 +78,7 @@ class Agent():
                 experiences = self.memory.sample()
                 self.learn(experiences, GAMMA)
 
-    def act(self, state, eps=0.):
+    def act(self, state, eps=0.0):
         """Returns actions for given state as per current policy.
 
         Params
@@ -92,9 +94,12 @@ class Agent():
 
         # Epsilon-greedy action selection
         if random.random() > eps:
-            return np.argmax(action_values.cpu().data.numpy())
+            return (
+                np.argmax(action_values.cpu().data.numpy()),
+                action_values.cpu().data.numpy()[0],
+            )
         else:
-            return random.choice(np.arange(self.action_size))
+            return np.random.choice(np.arange(self.action_size)), action_values[0]
 
     def learn(self, experiences, gamma):
         """Update value parameters using given batch of experience tuples.
@@ -106,7 +111,9 @@ class Agent():
         states, actions, rewards, next_states, dones = experiences
 
         # Get max predicted Q values (for next states) from target model
-        Q_targets_next = self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1)
+        Q_targets_next = (
+            self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1)
+        )
         # Compute Q targets for current states
         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
 
@@ -135,8 +142,13 @@ class Agent():
             target_model (PyTorch model): weights will be copied to
             tau (float): interpolation parameter
         """
-        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
-            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
+        for target_param, local_param in zip(
+            target_model.parameters(), local_model.parameters()
+        ):
+            target_param.data.copy_(
+                tau * local_param.data + (1.0 - tau) * target_param.data
+            )
+
 
 class ReplayBuffer:
     """Fixed-size buffer to store experience tuples."""
@@ -153,7 +165,10 @@ class ReplayBuffer:
         self.action_size = action_size
         self.memory = deque(maxlen=buffer_size)
         self.batch_size = batch_size
-        self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
+        self.experience = namedtuple(
+            "Experience",
+            field_names=["state", "action", "reward", "next_state", "done"],
+        )
         self.seed = random.seed(seed)
 
     def add(self, state, action, reward, next_state, done):
@@ -165,11 +180,41 @@ class ReplayBuffer:
         """Randomly sample a batch of experiences from memory."""
         experiences = random.sample(self.memory, k=self.batch_size)
 
-        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
-        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).long().to(device)
-        rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
-        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
-        dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(device)
+        states = (
+            torch.from_numpy(np.vstack([e.state for e in experiences if e is not None]))
+            .float()
+            .to(device)
+        )
+        actions = (
+            torch.from_numpy(
+                np.vstack([e.action for e in experiences if e is not None])
+            )
+            .long()
+            .to(device)
+        )
+        rewards = (
+            torch.from_numpy(
+                np.vstack([e.reward for e in experiences if e is not None])
+            )
+            .float()
+            .to(device)
+        )
+        next_states = (
+            torch.from_numpy(
+                np.vstack([e.next_state for e in experiences if e is not None])
+            )
+            .float()
+            .to(device)
+        )
+        dones = (
+            torch.from_numpy(
+                np.vstack([e.done for e in experiences if e is not None]).astype(
+                    np.uint8
+                )
+            )
+            .float()
+            .to(device)
+        )
 
         return (states, actions, rewards, next_states, dones)
 
@@ -177,8 +222,10 @@ class ReplayBuffer:
         """Return the current size of internal memory."""
         return len(self.memory)
 
-def train(agent,
-    n_episodes=2000, max_t=200, eps_start=1.0, eps_end=0.01, eps_decay=0.999):
+
+def train(
+    agent, n_episodes=2000, max_t=200, eps_start=1.0, eps_end=0.01, eps_decay=0.999
+):
     """Deep Q-Learning.
 
     Params
@@ -191,25 +238,95 @@ def train(agent,
         eps_decay (float): multiplicative factor (per episode) for decreasing epsilon
     """
     # writer = SummaryWriter(log_dir='dqn_runs/')
-    scores = []                        # list containing scores from each episode
+    scores = []  # list containing scores from each episode
     scores_window = deque(maxlen=100)  # last 100 scores
-    eps = eps_start                    # initialize epsilon
+    eps = eps_start  # initialize epsilon
     savenumber = 0
-    
+
     flag = 0
     num_blocker = 0
     num_catastrophe = 0
 
-    for i_episode in range(1, n_episodes+1):
-        if not ADD_HA: # not using human actions
+    for i_episode in range(0, n_episodes):
+        if i_episode % 100 == 0:
+            frames = []
+            num_test_episodes = 10
+            num_test_episodes_render = 3
+            total_test_reward = 0
+            num_test_catastrophes = 0
+            flag = 0
+            reward = 0.0
+            done = False
+
+            for episode in range(num_test_episodes):
+                state, _ = env.reset()
+
+                frames = []
+
+                for t in range(max_t):
+                    action, q_values = agent.act(
+                        state, 0.00
+                    )  # (AL: should be deterministic)
+
+                    if is_catastrophe(state):
+                        num_test_catastrophes += 1
+                        flag = 1
+
+                    frame = frame_write(
+                        env.render(),
+                        state,
+                        action,
+                        reward,
+                        done,
+                        t,
+                        q_values,
+                        is_catastrophe=(flag == 1),
+                    )
+
+                    next_state, reward, terminated, truncated, _ = env.step(action)
+                    done = terminated or truncated
+
+                    if flag == 1:
+                        reward = -2
+                        flag = 0
+
+                    frames.append(frame)
+
+                    state = next_state
+                    total_test_reward += reward
+
+                    if done:
+                        break
+
+                if episode < num_test_episodes_render:
+                    video_frames = np.array(frames)
+                    video_frames = np.transpose(video_frames, (0, 3, 1, 2))
+                    wandb.log(
+                        {
+                            f"Render/{episode}": wandb.Video(
+                                video_frames, fps=15, format="mp4"
+                            )
+                        }
+                    )
+
+            average_test_catastrophes = num_test_catastrophes / num_test_episodes
+            average_test_reward = total_test_reward / num_test_episodes
+            wandb.log(
+                {
+                    "test_catastophe": average_test_catastrophes,
+                    "test_score": average_test_reward,
+                }
+            )
+
+        if not ADD_HA:  # not using human actions
             state, _ = env.reset()
             score = 0
             num_blocker = 0
             num_catastrophe = 0
             for t in range(max_t):
-                action = agent.act(state, eps)
+                action, q_values = agent.act(state, eps)
                 robot_action = action
-                
+
                 if detect_catastrophe(state, action):
                     flag = 1
                     action = 2
@@ -217,7 +334,7 @@ def train(agent,
 
                 if is_catastrophe(state):
                     num_catastrophe += 1
-                
+
                 next_state, reward, terminated, truncated, _ = env.step(action)
                 done = terminated or truncated
 
@@ -226,7 +343,7 @@ def train(agent,
                     flag = 0
 
                 agent.step(state, robot_action, reward, next_state, done)
-                
+
                 state = next_state
                 score += reward
 
@@ -238,9 +355,9 @@ def train(agent,
             num_blocker = 0
             num_catastrophe = 0
             for t in range(max_t):
-                action = agent.act(state, eps)
+                action, q_values = agent.act(state, eps)
                 robot_action = action
-                
+
                 if detect_catastrophe(state, action):
                     flag = 1
                     action = 2
@@ -248,158 +365,173 @@ def train(agent,
 
                 if is_catastrophe(state):
                     num_catastrophe += 1
-                
+
                 next_state, reward, terminated, truncated, _ = env.step(action)
                 done = terminated or truncated
 
                 if flag == 1:
                     agent.step(state, robot_action, penalty, next_state, done)
-                    agent.step(state, action, reward, next_state, done)
+                    # agent.step(state, action, reward, next_state,  done)
+                    # add the human experience to the buffer as well
+                    # (AL: i think this is what you wanted to happen)
+                    agent.memory.add(state, action, reward, next_state, done)
                     reward = penalty
                     flag = 0
                 else:
                     agent.step(state, robot_action, reward, next_state, done)
-                
+
                 state = next_state
                 score += reward
 
                 if done:
                     break
 
-        scores_window.append(score)       # save most recent score
-        scores.append(score)              # save most recent score
-        eps = max(eps_end, eps_decay*eps) # decrease epsilon
-        print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores_window)), end="")
-        
+        scores_window.append(score)  # save most recent score
+        scores.append(score)  # save most recent score
+        eps = max(eps_end, eps_decay * eps)  # decrease epsilon
+        print(
+            "\rEpisode {}\tAverage Score: {:.2f}".format(
+                i_episode, np.mean(scores_window)
+            ),
+            end="",
+        )
+
         if run != None:
-            wandb.log({"num_episodes": i_episode, "score": score, "average_score": np.mean(scores_window), "epsilon": eps, "train_catastrophe": num_catastrophe, "train_blocker": num_blocker})
-            
-            if i_episode % 100 == 0:
-                frames = []
-                num_test_episodes = 10
-                total_test_reward = 0
-                num_test_catastrophes = 0
-                flag = 0
+            wandb.log(
+                {
+                    "num_episodes": i_episode,
+                    "score": score,
+                    "average_score": np.mean(scores_window),
+                    "epsilon": eps,
+                    "train_catastrophe": num_catastrophe,
+                    "train_blocker": num_blocker,
+                }
+            )
 
-                for episode in range(num_test_episodes):
-                    state, _ = env.reset()
-                    for i in range(max_t):
-                        action = agent.act(state, 0.01)
-
-                        if is_catastrophe(state):
-                            num_test_catastrophes += 1
-                            flag = 1
-                            frame = frame_write(env.render())
-                        else:
-                            frame = env.render()
-
-                        next_state, reward, terminated, truncated, _ = env.step(action)
-                        done = terminated or truncated
-
-                        if flag == 1:
-                            reward = -2
-                            flag = 0
-
-                        frames.append(frame)
-
-                        state = next_state
-                        total_test_reward += reward
-
-                        if done:
-                            break
-
-                video_frames = np.array(frames)
-                video_frames = np.transpose(video_frames, (0, 3, 1, 2))
-                wandb.log({"Render": wandb.Video(video_frames, fps=15, format="mp4")})
-
-                average_test_catastrophes = num_test_catastrophes / num_test_episodes
-                average_test_reward = total_test_reward / num_test_episodes
-                wandb.log({"test_catastophe": average_test_catastrophes, "test_score": average_test_reward})
-              
         if i_episode % 100 == 0:
-            savename = "./checkpoints/" + str(EXPERIMENT_NAME) + "/mc_dqn_" + str(i_episode) + ".pth"
-            print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores_window)))
+            savename = (
+                "./checkpoints/"
+                + str(EXPERIMENT_NAME)
+                + "/mc_dqn_"
+                + str(i_episode)
+                + ".pth"
+            )
+            print(
+                "\rEpisode {}\tAverage Score: {:.2f}".format(
+                    i_episode, np.mean(scores_window)
+                )
+            )
             torch.save(agent.qnetwork_local.state_dict(), savename)
             savenumber += 1
-        
+
     return scores
 
-def detect_catastrophe(state, action, force=0.001, gravity=0.0025): # accept state here
+
+def detect_catastrophe(state, action, force=0.001, gravity=0.0025):  # accept state here
     tuple_state = tuple(state)
     position = tuple_state[0]
     velocity = tuple_state[1]
 
-    new_velocity = np.clip(velocity + (action - 1) * force - np.cos(3 * position) * gravity, -0.07, 0.07)
+    new_velocity = np.clip(
+        velocity + (action - 1) * force - np.cos(3 * position) * gravity, -0.07, 0.07
+    )
     new_position = np.clip(position + new_velocity, -1.2, 0.6)
-    
+
     return new_position < -1.15
 
-def is_catastrophe(state): # accept state here
+
+def is_catastrophe(state):  # accept state here
     tuple_state = tuple(state)
     position = tuple_state[0]
     return position < -1.15
 
-# Function to discretize the continuous state space
-def discretize_state(state):
-    discretized_state = (state - env.observation_space.low) * np.array([20, 20])
-    return tuple(discretized_state.astype(int))
 
-def frame_write(frame):
+# Function to discretize the continuous state space
+# def discretize_state(state):
+#     discretized_state = (state - env.observation_space.low) * np.array([20, 20])
+#     return tuple(discretized_state.astype(int))
+
+
+def frame_write(frame, state, action, reward, done, t, q_values, is_catastrophe=False):
     img = Image.fromarray(frame)
     draw = ImageDraw.Draw(img)
-    draw.text((100, 100), "catastrophe", fill=(255, 0, 0)) #, font=font)
+    if is_catastrophe:
+        draw.text((100, 100), "catastrophe", fill=(255, 0, 0))  # , font=font)
+    draw.text(
+        (50, 50),
+        f"t: {t}, state: {[state[0].round(2), state[1].round(2)]}, action: {action}, done: {done}",
+        fill=(255, 0, 0),
+        size=40,
+    )
+    draw.text(
+        (50, 100),
+        f"q_values: {[q_values[0].round(2), q_values[1].round(2), q_values[2].round(2)]}",
+        fill=(255, 0, 0),
+        size=40,
+    )
     frame_with_text = np.array(img)
     return frame_with_text
 
-# Handle Argument Parsing:
-parser = argparse.ArgumentParser()
-parser.add_argument("--name", type=str, help="set the name of the experiment")
-parser.add_argument("--numeps", type=int, help="sets number of episodes")
-parser.add_argument("--seed", type=int, help="sets seed")
-parser.add_argument("--penalty", type=int, help="sets penalty")
-parser.add_argument("--addha", help="sets human actions to be true", action="store_true")
-parser.add_argument("--wandb", help="sets wandb to be true", action="store_true")
-args = parser.parse_args()
 
-BUFFER_SIZE = int(1e5)          # replay buffer size
-BATCH_SIZE = 64                 # minibatch size
-GAMMA = 0.99                    # discount factor
-TAU = 1e-3                      # for soft update of target parameters
-LR = 1e-3                       # learning rate
-UPDATE_EVERY = 4                # how often to update the network
+if __name__ == "__main__":
+    # Handle Argument Parsing:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--name", type=str, help="set the name of the experiment")
+    parser.add_argument("--numeps", type=int, help="sets number of episodes")
+    parser.add_argument("--seed", type=int, help="sets seed")
+    parser.add_argument("--penalty", type=int, help="sets penalty")
+    parser.add_argument(
+        "--addha", help="sets human actions to be true", action="store_true"
+    )
+    parser.add_argument("--wandb", help="sets wandb to be true", action="store_true")
+    args = parser.parse_args()
 
-WANDB = args.wandb              # log using wandb
-EXPERIMENT_NAME = args.name     # set experiment name
-SEED = args.seed                # seed
-PENALTY = args.penalty          # penalty (positive in argument, set to be negative below)
-ADD_HA = args.addha             # sets if human actions are in the buffer
-NUMEPS = args.numeps            # number of episodes
+    BUFFER_SIZE = int(1e5)  # replay buffer size
+    BATCH_SIZE = 64  # minibatch size
+    GAMMA = 0.99  # discount factor
+    TAU = 1e-3  # for soft update of target parameters
+    LR = 1e-3  # learning rate
+    UPDATE_EVERY = 4  # how often to update the network
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    WANDB = args.wandb  # log using wandb
+    EXPERIMENT_NAME = args.name  # set experiment name
+    SEED = args.seed  # seed
+    PENALTY = args.penalty  # penalty (positive in argument, set to be negative below)
+    ADD_HA = args.addha  # sets if human actions are in the buffer
+    NUMEPS = args.numeps  # number of episodes
 
-# Handle wandb:
-wandb_hyperparameters = {
-    'env_name': 'MountainCar-v0',
-    'n_episodes': NUMEPS,
-    'experiment_name': EXPERIMENT_NAME,
-    'dualbuf': True,
-    'buffer_size': BUFFER_SIZE,
-    'batch_size': BATCH_SIZE,
-    'gamma': GAMMA,
-    'tau': TAU,
-    'learning_rate': LR,
-    'update_every': UPDATE_EVERY,
-    'penalty': -2,
-    'seed': SEED,
-    'add_ha': ADD_HA,
-    'exp_ver': 'v7',
-}
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print("using device: ", device)
 
-penalty = -PENALTY
+    # Handle wandb:
+    wandb_hyperparameters = {
+        "env_name": "MountainCar-v0",
+        "n_episodes": NUMEPS,
+        "experiment_name": EXPERIMENT_NAME,
+        "dualbuf": True,
+        "buffer_size": BUFFER_SIZE,
+        "batch_size": BATCH_SIZE,
+        "gamma": GAMMA,
+        "tau": TAU,
+        "learning_rate": LR,
+        "update_every": UPDATE_EVERY,
+        "penalty": -2,
+        "seed": SEED,
+        "add_ha": ADD_HA,
+        "exp_ver": "v7",
+    }
 
-run = wandb.init(project="modified_hirl", name=EXPERIMENT_NAME, config=wandb_hyperparameters) if WANDB else None
+    penalty = -PENALTY
 
-os.makedirs("checkpoints/" + str(EXPERIMENT_NAME), exist_ok=True)
-env = gym.make("MountainCar-v0", render_mode="rgb_array")
-agent = Agent(state_size=2, action_size=3, seed=SEED)
-train(agent, n_episodes=NUMEPS)
+    run = (
+        wandb.init(
+            project="anthony_hirl", name=EXPERIMENT_NAME, config=wandb_hyperparameters
+        )
+        if WANDB
+        else None
+    )
+
+    os.makedirs("checkpoints/" + str(EXPERIMENT_NAME), exist_ok=True)
+    env = gym.make("MountainCar-v0", render_mode="rgb_array")
+    agent = Agent(state_size=2, action_size=3, seed=SEED)
+    train(agent, n_episodes=NUMEPS)
